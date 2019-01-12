@@ -1,7 +1,7 @@
-import sys
 import cv2
 import pyzed.sl as sl
 import numpy as np
+import time
 
 
 def print_camera_information(cam):
@@ -48,6 +48,23 @@ def norm(x):
     return np.sqrt(sum_)
 
 
+def avg_distance(pixel_rect, threshold):
+    len_ = len(pixel_rect)
+    sum_ = 0
+    for i, pixels in enumerate(pixel_rect):
+        temp = norm(pixels)
+        if temp < threshold:
+            sum_ += temp
+            print('dis:', temp)
+        else:
+            len_ -= 1
+
+    try:
+        return sum_/len_
+    except ZeroDivisionError:
+        return 0
+
+
 def create_circle(disp_img, center, distance, color=(0, 0, 255)):
     FONT = cv2.FONT_HERSHEY_SIMPLEX
     FONT_SIZE = 1
@@ -82,6 +99,33 @@ def create_circle(disp_img, center, distance, color=(0, 0, 255)):
             )
 
 
+def create_rect(disp_img, cx, cy, pts_cloud, diag=40, color=(0, 0, 255)):
+        tl, tr = (cx-diag, cy-diag), (cx+diag, cy-diag)
+        bl, br = (cx-diag, cy+diag), (cx+diag, cy+diag)
+        cv2.rectangle(disp_img, tl, br, (0, 0, 255), 2)
+
+        pixel_rect = []
+        step = 10
+        for col in range(tl[0], br[0]+1, step):
+            for row in range(tl[1], br[1]+1, step):
+                err, pixel = pts_cloud.get_value(col, row)
+                pixel_rect.append(pixel[:3])
+
+        avg_cm = avg_distance(pixel_rect, threshold=120)
+        cv2.putText(
+            disp_img,
+            '{:.2f} cm'.format(avg_cm),
+            tr,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA
+        )
+
+        return avg_cm
+
+
 def main():
     print("Running...")
     
@@ -91,7 +135,7 @@ def main():
     img = sl.Mat()
     depth = sl.Mat()
     point_cloud = sl.Mat()
-    dx_list = [x for x in range(-400, 400, 300)]
+    dx_list = [x for x in range(0, 300, 300)]
 
     colors = []
     for i in range(len(dx_list)):
@@ -99,10 +143,10 @@ def main():
 
     key = ''
 
-
-    while key != 113:
+    while key != 113: # press 'q' to exit
         err = cam.grab(runtime)
         if err == sl.ERROR_CODE.SUCCESS:
+            # Recieve image and measurement
             cam.retrieve_image(img, sl.VIEW.VIEW_LEFT)
             cam.retrieve_measure(depth, sl.MEASURE.MEASURE_DEPTH)
             cam.retrieve_measure(point_cloud, sl.MEASURE.MEASURE_XYZRGBA)
@@ -110,15 +154,26 @@ def main():
             disp_img = img.get_data()
             (cx, cy) = frame_center(img.get_width(), img.get_height())
 
-            for dx, color in zip(dx_list, colors):
-                error, pc = point_cloud.get_value(cx+dx, cy)
-                distance = np.round(norm(pc[:3]), decimals=2)
-                create_circle(disp_img, (cx+dx, cy), distance, color)
 
+            # Drawing and Calculate area in rectangle
+            avg_area1 = create_rect(disp_img, cx, cy, point_cloud, diag=40, color=(0, 0, 255))
+            # avg_area2 = create_rect(disp_img, 300, 300, point_cloud, diag=40, color=(255, 0, 0))
 
-            # print('INFO: (x, y) = {}, {} | point_cloud = {}'.format(cx, cy, pc1))
-            cv2.imshow("ZED", disp_img)
+            # Drawing Circle
+            # for dx, color in zip(dx_list, colors):
+            #     error, pc = point_cloud.get_value(cx+dx, cy)
+            #     distance = np.round(norm(pc[:3]), decimals=2)
+            #     create_circle(disp_img, (cx+dx, cy), distance, color)
+
+            cv2.imshow("Chicken Farm", disp_img)
             key = cv2.waitKey(5)
+            
+            # Delay
+            time.sleep(0.01)
+
+            # Writing to disk
+            with open('avg_log.txt', 'a') as file:
+                file.writelines('{:.2f},\n'.format(avg_area1))
         else:
             key = cv2.waitKey(5)
     
